@@ -1,33 +1,81 @@
-const express = require('express');
-const cors = require('cors');
-const fetch = require('node-fetch');
+import express from "express";
+import cors from "cors";
 
 const app = express();
-const PORT = process.env.PORT || 3000;
 
-// 🚀 關鍵核心：無條件放行所有網頁來抓資料，徹底粉碎 CORS 阻擋！
-app.use(cors());
+app.use(cors({
+  origin: [
+    "https://tmyawl-design.github.io",
+    "http://localhost:3000",
+    "http://localhost:5173"
+  ]
+}));
 
-// 建立一個專屬的資料通道網址： /api/parking
-app.get('/api/parking', async (req, res) => {
-    // 台中市政府開放資料官方 API 網址
-    const apiUrl = "https://datacenter.taichung.gov.tw/swagger/OpenData/72c08233-de17-43cf-87eb-f9e0b8e76c12";
-    
-    try {
-        // 由後端伺服器去抓政府資料（伺服器連線不會被瀏覽器 CORS 機制阻擋）
-        const response = await fetch(apiUrl);
-        if (!response.ok) throw new Error('政府 API 伺服器異常');
-        
-        const data = await response.json();
-        
-        // 成功拿到後，加上安全標頭，開開心心地吐給您的前端網頁 App
-        res.json(data);
-    } catch (error) {
-        console.error("後端抓取失敗:", error);
-        res.status(500).json({ error: "中轉站連線政府資料庫失敗" });
-    }
+app.get("/", (req, res) => {
+  res.json({
+    message: "Parking API is running",
+    test: "/parking?lat=24.179&lon=120.6466"
+  });
 });
 
+app.get("/parking", async (req, res) => {
+  const { lat, lon } = req.query;
+
+  if (!lat || !lon) {
+    return res.status(400).json({
+      error: "請提供 lat 與 lon",
+      example: "/parking?lat=24.179&lon=120.6466"
+    });
+  }
+
+  const apiUrl =
+    `https://parkboss.tw/api/v1/query-parking-space-by-coordinate?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`;
+
+  try {
+    const response = await fetch(apiUrl, {
+      method: "GET",
+      headers: {
+        "Accept": "application/json, text/plain, */*",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+        "Referer": "https://parkboss.tw/",
+        "Origin": "https://parkboss.tw"
+      }
+    });
+
+    const contentType = response.headers.get("content-type") || "";
+    const text = await response.text();
+
+    if (!response.ok) {
+      return res.status(response.status).json({
+        error: "ParkBoss API 拒絕或查詢失敗",
+        status: response.status,
+        contentType,
+        preview: text.slice(0, 500)
+      });
+    }
+
+    try {
+      const data = JSON.parse(text);
+      return res.json(data);
+    } catch {
+      return res.status(502).json({
+        error: "ParkBoss 回傳內容不是 JSON",
+        status: response.status,
+        contentType,
+        preview: text.slice(0, 500)
+      });
+    }
+
+  } catch (err) {
+    return res.status(500).json({
+      error: "後端查詢失敗",
+      detail: String(err)
+    });
+  }
+});
+
+const PORT = process.env.PORT || 3000;
+
 app.listen(PORT, () => {
-    console.log(`後端中轉站已在連接埠 ${PORT} 順利啟動！`);
+  console.log(`Parking API running on port ${PORT}`);
 });
